@@ -2,34 +2,19 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from app.services import faculty_service
-from app.config import settings
-from jose import JWTError, jwt
-from datetime import datetime, timedelta, timezone
+from app.models.faculty import FacultyOut
+from datetime import timedelta
+
+# Import the functions from our new security file
+from app.security import create_access_token, get_current_user
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
-
-# --- Token Creation ---
-def create_access_token(data: dict, expires_delta: timedelta | None = None):
-    to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
-    else:
-        # Default token expiry: 30 minutes
-        expire = datetime.now(timezone.utc) + timedelta(minutes=30)
-    
-    to_encode.update({"exp": expire})
-    # Use your SECRET_KEY from .env
-    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm="HS256")
-    return encoded_jwt
-# ----------------------
 
 
 @router.post("/login")
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
     """
     This is the main login endpoint.
-    It uses OAuth2PasswordRequestForm, so it expects 'username' and 'password'
-    sent in a form-data request.
     """
     
     # 1. Find the user by email (which is the 'username' in the form)
@@ -51,3 +36,16 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     )
     
     return {"access_token": access_token, "token_type": "bearer"}
+
+# Endpoint to get info about the logged-in user
+# It now correctly depends on get_current_user from security.py
+@router.get("/me", response_model=FacultyOut)
+async def read_users_me(current_user: dict = Depends(get_current_user)):
+    """
+    A protected endpoint that returns the details
+    of the currently logged-in faculty.
+    """
+    faculty = await faculty_service.get_faculty_by_id(current_user["id"])
+    if not faculty:
+        raise HTTPException(status_code=404, detail="Faculty not found")
+    return faculty

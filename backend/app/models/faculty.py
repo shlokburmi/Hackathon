@@ -1,21 +1,18 @@
-from pydantic import BaseModel
-from typing import Optional, List
+# app/models/faculty.py
+
+from pydantic import BaseModel, EmailStr
+from typing import List
 
 class FacultyBase(BaseModel):
     name: str
-    email: str
+    email: EmailStr
     department: str
     max_weekly_load: int
     subjects_can_teach: List[str] = []
-    available_slots: List[int] = []
-    password: str
+    available_slots: List[str] = []
 
 class FacultyCreate(FacultyBase):
-    password: str   # optional, if you want auth
+    password: str
 
 class FacultyOut(FacultyBase):
-    id: str
-    
-    # FIX: Changed 'orm_mode' to 'from_attributes'
-    class Config:
-        from_attributes = True
+    id: str  # returned to frontend (no password!)

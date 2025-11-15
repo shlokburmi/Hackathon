@@ -4,117 +4,154 @@ from app.models.faculty import FacultyCreate, FacultyOut, FacultyBase
 from bson import ObjectId
 from passlib.context import CryptContext
 
-# --- Security Setup ---
-# 1. Create a context for hashing passwords
+# bcrypt-safe hashing context
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# 2. Function to hash a password
-def get_password_hash(password):
+
+# ---------------------
+# PASSWORD HELPERS
+# ---------------------
+def get_password_hash(password: str):
+    # cast to string + fix >72 bytes bcrypt bug
+    password = str(password)[:72]
     return pwd_context.hash(password)
 
-# 3. Function to verify a password
+
 def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
-# ------------------------
+    return pwd_context.verify(str(plain_password), hashed_password)
 
 
+# database collection
 faculty_col = db["faculties"]
 
+
+# ---------------------
+# SERIALIZER
+# ---------------------
+def _serialize_faculty(doc: dict) -> FacultyOut:
+    """
+    Converts MongoDB faculty doc into FacultyOut schema safely.
+    Removes password and converts _id to string.
+    """
+    if not doc:
+        return None
+
+    # copy so we don't mutate caller's dict
+    s = dict(doc)
+
+    # remove password before returning to client
+    s.pop("password", None)
+
+    return FacultyOut(
+        id=str(s.get("_id")),
+        name=s.get("name"),
+        email=s.get("email"),
+        department=s.get("department"),
+        max_weekly_load=s.get("max_weekly_load"),
+        subjects_can_teach=s.get("subjects_can_teach", []),
+        available_slots=s.get("available_slots", [])
+    )
+
+
+# ---------------------
+# CREATE
+# ---------------------
 async def create_faculty(data: FacultyCreate):
-    """
-    Creates a new faculty, hashing the password before storage.
-    """
-    # Check duplicate
+    # check duplicate email
     existing = await faculty_col.find_one({"email": data.email})
     if existing:
-        return None  # Return None to indicate failure (duplicate)
+        return None
 
-    new_doc = data.dict()
-    
-    # --- Hash the password ---
-    # Never store plain-text passwords!
-    new_doc["password"] = get_password_hash(data.password)
-    # -------------------------
+    doc = data.dict()
+    # hash password safely
+    doc["password"] = get_password_hash(data.password)
 
-    new_doc["_id"] = str(ObjectId())
-    
-    await faculty_col.insert_one(new_doc)
-    
-    # Return the new document as a FacultyOut model
-    new_doc["id"] = new_doc["_id"]
-    return FacultyOut(**new_doc)
+    # use a real ObjectId
+    doc["_id"] = ObjectId()
+
+    await faculty_col.insert_one(doc)
+
+    # fetch the created document so fields are normalized
+    created = await faculty_col.find_one({"_id": doc["_id"]})
+    return _serialize_faculty(created)
 
 
+# ---------------------
+# READ ALL
+# ---------------------
 async def get_all_faculties():
-    """
-    Retrieves all faculties from the database.
-    """
-    docs = []
-    async for fac in faculty_col.find({}):
-        fac["id"] = fac["_id"]
-        docs.append(FacultyOut(**fac))
-    return docs
+    results = []
+    cursor = faculty_col.find({})
+    async for fac in cursor:
+        results.append(_serialize_faculty(fac))
+    return results
 
 
+# ---------------------
+# READ BY ID
+# ---------------------
 async def get_faculty_by_id(faculty_id: str):
-    """
-    Retrieves a single faculty by their ID.
-    """
-    fac = await faculty_col.find_one({"_id": faculty_id})
+    if not ObjectId.is_valid(faculty_id):
+        return None
+
+    fac = await faculty_col.find_one({"_id": ObjectId(faculty_id)})
     if not fac:
         return None
-    
-    fac["id"] = fac["_id"]
-    return FacultyOut(**fac)
+    return _serialize_faculty(fac)
 
 
+# ---------------------
+# READ BY EMAIL (needed for login)
+# ---------------------
 async def get_faculty_by_email(email: str):
-    """
-    Retrieves a single faculty by their email (needed for login).
-    """
-    fac = await faculty_col.find_one({"email": email})
-    return fac
+    # return the raw document (contains password) for authentication checks
+    return await faculty_col.find_one({"email": email})
 
 
+# ---------------------
+# UPDATE
+# ---------------------
 async def update_faculty_details(faculty_id: str, data: FacultyBase):
-    """
-    Updates a faculty's details.
-    Note: This doesn't update the password, only base details.
-    """
-    update_data = data.dict(exclude_unset=True) # Exclude unset to avoid overwriting
+    if not ObjectId.is_valid(faculty_id):
+        return None
 
-    # If password is in the update data, make sure to hash it
-    # (Though typically password updates are handled separately)
-    if "password" in update_data:
-        update_data["password"] = get_password_hash(update_data["password"])
+    updates = data.dict(exclude_unset=True)
+
+    if "password" in updates:
+        updates["password"] = get_password_hash(updates["password"])
 
     updated = await faculty_col.find_one_and_update(
-        {"_id": faculty_id},
-        {"$set": update_data},
+        {"_id": ObjectId(faculty_id)},
+        {"$set": updates},
         return_document=True
     )
 
     if not updated:
         return None
 
-    updated["id"] = updated["_id"]
-    return FacultyOut(**updated)
+    return _serialize_faculty(updated)
 
 
+# ---------------------
+# DELETE
+# ---------------------
 async def remove_faculty(faculty_id: str):
-    """
-    Deletes a faculty from the database.
-    """
-    result = await faculty_col.delete_one({"_id": faculty_id})
+    if not ObjectId.is_valid(faculty_id):
+        return False
+
+    result = await faculty_col.delete_one({"_id": ObjectId(faculty_id)})
     return result.deleted_count > 0
 
 
+# ---------------------
+# UPDATE AVAILABILITY
+# ---------------------
 async def set_faculty_availability(faculty_id: str, availability: dict):
-    """
-    Updates a faculty's availability.
-    """
-    updated = await faculty_col.update_one(
-        {"_id": faculty_id},
+    if not ObjectId.is_valid(faculty_id):
+        return False
+
+    result = await faculty_col.update_one(
+        {"_id": ObjectId(faculty_id)},
         {"$set": {"availability": availability}}
     )
-    return updated.modified_count > 0
+    return result.modified_count > 0
