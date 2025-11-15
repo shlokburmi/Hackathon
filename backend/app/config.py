@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class Settings:
-    MONGO_URL = os.getenv("MONGO_URL")
+    MONGO_URL = os.getenv("MONGO_URI") 
     DB_NAME = os.getenv("DB_NAME")
     SECRET_KEY = os.getenv("SECRET_KEY")
 
