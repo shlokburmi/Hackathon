@@ -1,13 +1,14 @@
-from pydantic_settings import BaseSettings
+# app/config.py
+import os
+from dotenv import load_dotenv
 
-class Settings(BaseSettings):
-    MONGO_URI: str
-    DB_NAME: str
-    SECRET_KEY: str
-    GROQ_API_KEY: str  # <-- ADD THIS
+load_dotenv()
 
-    class Config:
-        env_file = ".env"
-        extra = "allow"   # optional, allows future extra vars
+class Settings:
+    # Accept either MONGO_URI or MONGO_URL env key (your .env uses MONGO_URL)
+    MONGO_URI: str = os.getenv("MONGO_URI") or os.getenv("MONGO_URL")
+    DB_NAME: str = os.getenv("DB_NAME", "timetable")
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "change-me")
+    GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
 
 settings = Settings()

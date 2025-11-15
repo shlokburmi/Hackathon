@@ -1,7 +1,7 @@
+# app/main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-# Import the new auth router
-from app.routers import faculty, subject, schedule, room, batch, auth
+from app.routers import auth, ai, faculty, subject, schedule, room, batch
 
 app = FastAPI()
 
@@ -13,10 +13,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Add the new auth router to your app
 app.include_router(auth.router)
-
-# Include all your other routers
+app.include_router(ai.router)
 app.include_router(faculty.router)
 app.include_router(subject.router)
 app.include_router(schedule.router)
