@@ -15,5 +15,7 @@ class FacultyCreate(FacultyBase):
 
 class FacultyOut(FacultyBase):
     id: str
+    
+    # FIX: Changed 'orm_mode' to 'from_attributes'
     class Config:
-        orm_mode = True
+        from_attributes = True

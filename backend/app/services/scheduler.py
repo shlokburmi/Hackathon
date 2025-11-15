@@ -134,9 +134,14 @@ async def generate_schedule(subjects, faculties, rooms, batches):
 
     # 5) Batch-level constraint: for each batch, sessions for subjects that that batch takes must not overlap
     for batch in batches:
-        subj_codes = set(batch.get("subject_ids", []))
+        # Use 'subjects' from batch model, not 'subject_ids'
+        subj_codes = set(batch.get("subjects", [])) 
         # collect indices of sessions that are for subjects in this batch
         idxs = [idx for idx, ses in enumerate(sessions) if ses["subject"].get("code") in subj_codes]
+        
+        if not idxs:
+            continue # This batch has no subjects from the main list, skip.
+
         for a in range(len(idxs)):
             for b in range(a + 1, len(idxs)):
                 i = idxs[a]
@@ -151,21 +156,11 @@ async def generate_schedule(subjects, faculties, rooms, batches):
         model.Add(sum(b_fac[i][f_idx] for i in range(n)) <= max_load)
 
     # ----------------------------
-    # No objective (just find any feasible schedule quickly)
+    # STRONG CONSTRAINTS (robust) - MOVED FROM LATER
     # ----------------------------
+    # This section was previously after the solver.Solve() call, which was incorrect.
+    # It is now moved here, before the solver is called.
 
-    solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = 15
-    solver.parameters.num_search_workers = 8
-
-    result = solver.Solve(model)
-
-    if result not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        return {"status": "fail", "message": "No valid schedule found"}
-    
-        # ----------------------------
-    # STRONG CONSTRAINTS (robust)
-    # ----------------------------
     n = len(sessions)
 
     # Create booleans that indicate whether two sessions are in the same slot
@@ -185,9 +180,7 @@ async def generate_schedule(subjects, faculties, rooms, batches):
             sslot = same_slot[(i, j)]
             # For each faculty index, if both sessions are assigned to that faculty and same slot -> forbidden
             for f_idx in range(fac_count):
-                # If both b_fac[i][f_idx] and b_fac[j][f_idx] are true and same_slot -> this combination is invalid.
                 # Enforce: NOT( b_fac[i][f_idx] AND b_fac[j][f_idx] AND sslot )
-                # Equivalent: enforce slot_i != slot_j when both b_fac are true (we already have similar), but explicitly:
                 model.AddBoolOr([
                     b_fac[i][f_idx].Not(),
                     b_fac[j][f_idx].Not(),
@@ -204,7 +197,20 @@ async def generate_schedule(subjects, faculties, rooms, batches):
                     b_room[j][r_idx].Not(),
                     sslot.Not()
                 ])
+                
+    # ----------------------------------------------------
+    # *** MOVED SOLVER BLOCK HERE ***
+    # This block was previously before the "STRONG CONSTRAINTS"
+    # ----------------------------------------------------
+    
+    solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = 15
+    solver.parameters.num_search_workers = 8
 
+    result = solver.Solve(model)
+
+    if result not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        return {"status": "fail", "message": "No valid schedule found"}
 
     # Build output
     output = []
@@ -225,5 +231,3 @@ async def generate_schedule(subjects, faculties, rooms, batches):
         })
 
     return {"status": "success", "schedule": output}
-
-
